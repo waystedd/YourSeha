@@ -26,7 +26,7 @@ function useGoAfterVerification(navigate) {
       navigate("/EditProfile")
       return
     }
-    navigate(user?.role === "psychologist" ? "/PsychologistDashboard" : "/Home")
+    navigate(user?.role === "psychologist" ? "/PsychologistDashboard" : "/WellnessDashboard")
   }, [navigate, queryClient])
 }
 

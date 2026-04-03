@@ -135,15 +135,20 @@ export default function PsychologistAppointments() {
     queryFn: () => base44.entities.Appointment.list('-date', 200),
   })
 
+  const myAppointments = useMemo(() => {
+    if (!psychologist?.id) return []
+    return appointments.filter((a) => a.psychologist_id === psychologist.id)
+  }, [appointments, psychologist?.id])
+
   useEffect(() => {
     setZoomDrafts((current) => {
       const next = { ...current }
-      appointments.forEach((appointment) => {
+      myAppointments.forEach((appointment) => {
         next[appointment.id] = current[appointment.id] ?? appointment.meeting_link ?? ''
       })
       return next
     })
-  }, [appointments])
+  }, [myAppointments])
 
   const saveWeeklySchedule = async () => {
     if (!scheduleForm.workDays.length) {
@@ -170,9 +175,18 @@ export default function PsychologistAppointments() {
         slotIntervalCustom: scheduleForm.slotIntervalCustom,
         caregiverDurationCustom: scheduleForm.caregiverDurationCustom,
       })
+      await base44.auth.syncPsychologistAvailabilityFromSchedule({
+        workDays: scheduleForm.workDays,
+        workStart: scheduleForm.workStart,
+        workEnd: scheduleForm.workEnd,
+        slotIntervalMinutes: slotMin,
+        caregiverDurationMinutes: careMin,
+      })
       queryClient.invalidateQueries({ queryKey: ['psychologistAvailabilityJson', user?.id] })
-      queryClient.invalidateQueries({ queryKey: ['psychologistAvailability', user?.id] })
-      toast.success('Schedule saved')
+      if (psychologist?.id) {
+        queryClient.invalidateQueries({ queryKey: ['psychologistAvailability', psychologist.id] })
+      }
+      toast.success('Schedule saved — caregivers can now book your open slots')
     } catch (e) {
       toast.error(e?.message || 'Could not save schedule')
     } finally {
@@ -234,15 +248,15 @@ export default function PsychologistAppointments() {
 
   const counts = useMemo(() => {
     const byStatus = { upcoming: 0, completed: 0, cancelled: 0 }
-    for (const appointment of appointments) {
+    for (const appointment of myAppointments) {
       if (appointment.status && byStatus[appointment.status] != null) byStatus[appointment.status] += 1
     }
     return byStatus
-  }, [appointments])
+  }, [myAppointments])
 
   const filtered = useMemo(
-    () => appointments.filter((appointment) => (appointment.status || 'upcoming') === active),
-    [appointments, active],
+    () => myAppointments.filter((appointment) => (appointment.status || 'upcoming') === active),
+    [myAppointments, active],
   )
 
   const summaryLine = useMemo(

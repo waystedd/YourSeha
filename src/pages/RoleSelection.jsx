@@ -35,7 +35,7 @@ export default function RoleSelection() {
         toast.info("Please complete your professional profile to continue")
         navigate("/EditProfile")
       } else {
-        navigate("/Home")
+        navigate("/WellnessDashboard")
       }
     } finally {
       setSaving(false)

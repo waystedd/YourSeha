@@ -620,6 +620,104 @@ export const base44 = {
       }
     },
 
+    /**
+     * Rebuilds future bookable rows in `psychologist_availability` from the weekly schedule
+     * (called after saving availability notes so caregivers see slots on the psychologist profile).
+     */
+    async syncPsychologistAvailabilityFromSchedule(schedule) {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) throw new Error("Not authenticated")
+
+      const { data: psych, error: psychErr } = await supabase.from("psychologists").select("id").eq("user_id", user.id).maybeSingle()
+      if (psychErr) throw new Error(psychErr.message)
+      if (!psych?.id) throw new Error("Complete your psychologist profile before saving availability")
+
+      const workDays = Array.isArray(schedule?.workDays) ? schedule.workDays : []
+      if (workDays.length === 0) throw new Error("Pick at least one working day")
+
+      const workStart = schedule?.workStart || "08:00"
+      const workEnd = schedule?.workEnd || "14:00"
+      const slotInterval = Math.max(15, Number(schedule?.slotIntervalMinutes) || 30)
+      const careMin = Math.max(15, Number(schedule?.caregiverDurationMinutes) || 120)
+
+      const dayIdToJs = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+      const activeJsDays = new Set(workDays.map((id) => dayIdToJs[id]).filter((n) => n != null))
+
+      const parseHM = (s) => {
+        const parts = String(s || "0:0").split(":")
+        const h = parseInt(parts[0], 10)
+        const m = parseInt(parts[1], 10)
+        return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+      }
+      const fmtHM = (totalMin) => {
+        const h = Math.floor(totalMin / 60) % 24
+        const m = totalMin % 60
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+      }
+
+      const startM = parseHM(workStart)
+      const endM = parseHM(workEnd)
+      if (endM <= startM) throw new Error("End time must be after start time")
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const y0 = today.getFullYear()
+      const m0 = String(today.getMonth() + 1).padStart(2, "0")
+      const d0 = String(today.getDate()).padStart(2, "0")
+      const todayStr = `${y0}-${m0}-${d0}`
+
+      const horizonDays = 56
+      const rows = []
+      const seen = new Set()
+
+      for (let d = 0; d < horizonDays; d++) {
+        const cur = new Date(today)
+        cur.setDate(cur.getDate() + d)
+        if (!activeJsDays.has(cur.getDay())) continue
+
+        const y = cur.getFullYear()
+        const mo = String(cur.getMonth() + 1).padStart(2, "0")
+        const da = String(cur.getDate()).padStart(2, "0")
+        const dateStr = `${y}-${mo}-${da}`
+
+        for (let t = startM; t + careMin <= endM; t += slotInterval) {
+          const timeStr = fmtHM(t)
+          const key = `${dateStr}|${timeStr}`
+          if (seen.has(key)) continue
+          seen.add(key)
+          rows.push({
+            psychologist_id: psych.id,
+            date: dateStr,
+            time: timeStr,
+            is_booked: false,
+            created_at: new Date().toISOString(),
+          })
+        }
+      }
+
+      if (rows.length === 0) {
+        throw new Error(
+          "No bookable slots fit in your hours with the current max session length. Shorten the max session length or widen your working window.",
+        )
+      }
+
+      const del = await supabase
+        .from("psychologist_availability")
+        .delete()
+        .eq("psychologist_id", psych.id)
+        .eq("is_booked", false)
+        .gte("date", todayStr)
+
+      if (del.error) throw new Error(del.error.message)
+
+      const batchSize = 80
+      for (let i = 0; i < rows.length; i += batchSize) {
+        const chunk = rows.slice(i, i + batchSize)
+        const ins = await supabase.from("psychologist_availability").insert(chunk).select("id")
+        if (ins.error) throw new Error(ins.error.message)
+      }
+    },
+
     async incrementResourceView(resourceId) {
       if (!resourceId) return
       const { error } = await supabase.rpc("increment_resource_view", { p_resource_id: resourceId })

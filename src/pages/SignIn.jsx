@@ -26,7 +26,7 @@ export default function SignIn() {
     if (!user?.role_selected) { navigate("/RoleSelection"); return }
     if (user?.role === "psychologist" && !user?.onboarding_completed) { toast.info("Please complete your professional profile first"); navigate("/EditProfile"); return }
     if (returnUrl && returnUrl !== "/") { navigate(returnUrl); return }
-    navigate(user?.role === "psychologist" ? "/PsychologistDashboard" : "/Home")
+    navigate(user?.role === "psychologist" ? "/PsychologistDashboard" : "/WellnessDashboard")
   }
 
   const handleLogin = async (e) => {

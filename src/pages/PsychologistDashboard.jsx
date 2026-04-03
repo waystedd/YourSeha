@@ -1,4 +1,4 @@
-import React from "react"
+import React, { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { useQuery } from "@tanstack/react-query"
 import { base44 } from "@/api/base44Client"
@@ -27,15 +27,27 @@ export default function PsychologistDashboard() {
     queryFn: () => base44.entities.Appointment.list("-date", 100),
   })
 
+  const { data: psychologistRows = [] } = useQuery({
+    queryKey: ["myPsychologistProfile", user?.id],
+    queryFn: () => base44.entities.Psychologist.filter({ user_id: user?.id }, "-created_date", 1),
+    enabled: !!user?.id,
+  })
+  const psychologist = psychologistRows[0]
+
+  const myAppointments = useMemo(() => {
+    if (!psychologist?.id) return []
+    return appointments.filter((a) => a.psychologist_id === psychologist.id)
+  }, [appointments, psychologist?.id])
+
   const { data: resources = [] } = useQuery({
     queryKey: ["myResources", user?.id],
     queryFn: () => base44.entities.Resource.filter({ created_by: user?.id }),
     enabled: !!user?.id,
   })
 
-  const upcoming = appointments.filter((a) => a.status === "upcoming")
-  const completed = appointments.filter((a) => a.status === "completed")
-  const uniquePatients = [...new Set(appointments.map((a) => a.user_id || a.user_email).filter(Boolean))]
+  const upcoming = myAppointments.filter((a) => a.status === "upcoming")
+  const completed = myAppointments.filter((a) => a.status === "completed")
+  const uniquePatients = [...new Set(myAppointments.map((a) => a.user_id || a.user_email).filter(Boolean))]
 
   const firstName = user?.full_name?.split(" ")[0] || "Doctor"
   const hour = new Date().getHours()
@@ -124,8 +136,8 @@ export default function PsychologistDashboard() {
             <Calendar className="w-12 h-12 text-gray-300 mx-auto mb-3" />
             <p className="text-gray-500 font-medium">No upcoming sessions</p>
             <p className="text-sm text-gray-400 mt-1">Your schedule is clear for now</p>
-            <Link to="/EditProfile" className="inline-block mt-4 text-sm text-blue-500 hover:underline">
-              Update your availability →
+            <Link to="/PsychologistAppointments" className="inline-block mt-4 text-sm text-blue-500 hover:underline">
+              Set your weekly availability →
             </Link>
           </motion.div>
         ) : (
@@ -143,10 +155,14 @@ export default function PsychologistDashboard() {
               {upcoming.slice(0, 3).map((appt) => (
                 <div key={appt.id} className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-100">
                   <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center flex-shrink-0">
-                    <span className="text-white font-medium text-sm">P</span>
+                    <span className="text-white font-medium text-sm">
+                      {(appt.user_email || "C").charAt(0).toUpperCase()}
+                    </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-gray-800 text-sm truncate">Patient Session</p>
+                    <p className="font-medium text-gray-800 text-sm truncate">
+                      {appt.user_email ? `Caregiver · ${appt.user_email}` : "Booked session"}
+                    </p>
                     <p className="text-xs text-gray-500">
                       {appt.date} at {appt.time}
                     </p>

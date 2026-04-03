@@ -7,14 +7,28 @@ import { Input } from "@/components/ui/input"
 export default function PsychologistPatients() {
   const [search, setSearch] = useState("")
 
+  const { data: user } = useQuery({ queryKey: ["currentUser"], queryFn: () => base44.auth.me() })
+
+  const { data: psychologistRows = [] } = useQuery({
+    queryKey: ["myPsychologistProfile", user?.id],
+    queryFn: () => base44.entities.Psychologist.filter({ user_id: user?.id }, "-created_date", 1),
+    enabled: !!user?.id,
+  })
+  const psychologist = psychologistRows[0]
+
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["allAppointments"],
     queryFn: () => base44.entities.Appointment.list("-date", 500),
   })
 
+  const myAppointments = useMemo(() => {
+    if (!psychologist?.id) return []
+    return appointments.filter((a) => a.psychologist_id === psychologist.id)
+  }, [appointments, psychologist?.id])
+
   const patients = useMemo(() => {
     const map = new Map()
-    for (const appt of appointments) {
+    for (const appt of myAppointments) {
       const key = appt.user_id || appt.user_email || "anonymous"
       const entry = map.get(key) || { key, email: appt.user_email || "", sessions: 0, lastSession: null }
       entry.sessions++
@@ -25,7 +39,7 @@ export default function PsychologistPatients() {
     if (!search.trim()) return list
     const q = search.toLowerCase()
     return list.filter((p) => p.email.toLowerCase().includes(q))
-  }, [appointments, search])
+  }, [myAppointments, search])
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#F0F4FF] to-white py-8">

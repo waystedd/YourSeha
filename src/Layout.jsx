@@ -116,7 +116,7 @@ function LayoutInner({ children, currentPageName }) {
 
   const navItems = user ? (isPsychologist ? psychologistNavItems : caregiverNavItems) : []
   const showDailyCheckIn = !!user && user.role !== 'psychologist' && !['SignIn', 'RoleSelection', 'VerifyEmail'].includes(currentPageName)
-  const logoTarget = !user ? createPageUrl('SignIn') : isPsychologist ? createPageUrl('PsychologistDashboard') : createPageUrl('Home')
+  const logoTarget = !user ? createPageUrl('SignIn') : isPsychologist ? createPageUrl('PsychologistDashboard') : createPageUrl('WellnessDashboard')
 
   useEffect(() => {
     if (!user) return undefined

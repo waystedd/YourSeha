@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
+import { generateOpenSlotsFromAvailabilityNotes } from '@/lib/psychologistAvailabilitySlots'
 
 export default function PsychologistProfile() {
   const location = useLocation()
@@ -31,37 +32,58 @@ export default function PsychologistProfile() {
     queryFn: () => base44.entities.Psychologist.list('-rating', 100),
   })
 
+  const { data: psychDetail = [], isLoading: psychDetailLoading } = useQuery({
+    queryKey: ['psychologistById', psychId],
+    queryFn: () => base44.entities.Psychologist.filter({ id: psychId }, '-created_date', 1),
+    enabled: !!psychId,
+  })
+
   const { data: saved = [] } = useQuery({
     queryKey: ['savedPsychologists', user?.id],
     queryFn: () => base44.entities.SavedPsychologist.filter({ user_id: user?.id }, '-created_date', 100),
     enabled: !!user?.id,
   })
 
-  const { data: availability = [] } = useQuery({
+  const { data: availabilityRaw = [] } = useQuery({
     queryKey: ['psychologistAvailability', psychId],
     queryFn: () => base44.entities.PsychologistAvailability.filter(
       { psychologist_id: psychId, is_booked: false },
       'date',
-      100
+      500
     ),
     enabled: !!psychId,
+    refetchOnMount: 'always',
   })
 
-  const psychologist = psychologists.find((item) => item.id === psychId)
+  const psychologist = psychDetail[0] || psychologists.find((item) => item.id === psychId)
   const savedRecord = saved.find((item) => item.psychologist_id === psychId)
   const isConnected = !!savedRecord
 
   const [bookingOpen, setBookingOpen] = useState(false)
   const [booking, setBooking] = useState({ date: '', time: '', notes: '' })
 
+  /** DB rows when present; otherwise slots computed from saved weekly schedule (JSON) so booking still works */
+  const bookableSlots = useMemo(() => {
+    if (availabilityRaw.length > 0) return availabilityRaw
+    const raw = psychologist?.availability_notes
+    if (!raw) return []
+    return generateOpenSlotsFromAvailabilityNotes(raw).map((s) => ({
+      id: null,
+      date: s.date,
+      time: s.time,
+      is_booked: false,
+      _fromSchedule: true,
+    }))
+  }, [availabilityRaw, psychologist?.availability_notes])
+
   const groupedSlots = useMemo(() => {
     const map = new Map()
-    availability.forEach((slot) => {
+    bookableSlots.forEach((slot) => {
       if (!map.has(slot.date)) map.set(slot.date, [])
       map.get(slot.date).push(slot)
     })
     return Array.from(map.entries())
-  }, [availability])
+  }, [bookableSlots])
 
   const connect = useMutation({
     mutationFn: async () => {
@@ -108,7 +130,7 @@ export default function PsychologistProfile() {
 
   const bookAppointment = useMutation({
     mutationFn: async () => {
-      const slot = availability.find(
+      let slot = bookableSlots.find(
         (item) => item.date === booking.date && item.time === booking.time
       )
 
@@ -116,10 +138,22 @@ export default function PsychologistProfile() {
         throw new Error('Please choose an available date and time')
       }
 
+      let slotId = slot.id
+      if (!slotId) {
+        const created = await base44.entities.PsychologistAvailability.create({
+          psychologist_id: psychId,
+          date: booking.date,
+          time: booking.time,
+          is_booked: false,
+        })
+        slotId = created.id
+        slot = { ...slot, id: slotId }
+      }
+
       const appointment = await base44.entities.Appointment.create({
         psychologist_id: psychId,
         psychologist_name: psychologist.name,
-        availability_slot_id: slot.id,
+        availability_slot_id: slotId,
         date: booking.date,
         time: booking.time,
         session_type: 'online',
@@ -129,7 +163,7 @@ export default function PsychologistProfile() {
         status: 'upcoming',
       })
 
-      await base44.entities.PsychologistAvailability.update(slot.id, { is_booked: true })
+      await base44.entities.PsychologistAvailability.update(slotId, { is_booked: true })
 
       if (psychologist?.user_id) {
         await base44.entities.Notification.create({
@@ -152,6 +186,14 @@ export default function PsychologistProfile() {
     },
     onError: (error) => toast.error(error?.message || 'Could not book appointment'),
   })
+
+  if (psychDetailLoading && !psychologist) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#FFF8F6] to-white py-16 flex justify-center">
+        <p className="text-gray-500 text-sm">Loading profile…</p>
+      </div>
+    )
+  }
 
   if (!psychologist) return null
 
@@ -284,7 +326,7 @@ export default function PsychologistProfile() {
                   <div className="flex flex-wrap gap-2">
                     {slots.map((slot) => (
                       <span
-                        key={slot.id}
+                        key={slot.id || `v-${slot.date}-${slot.time}`}
                         className="px-3 py-1 rounded-full bg-white border border-[#FFE5D9] text-sm text-[#25364f]"
                       >
                         {slot.time}
@@ -351,10 +393,10 @@ export default function PsychologistProfile() {
                   disabled={!booking.date}
                 >
                   <option value="">Select time</option>
-                  {availability
+                  {bookableSlots
                     .filter((slot) => slot.date === booking.date)
                     .map((slot) => (
-                      <option key={slot.id} value={slot.time}>
+                      <option key={slot.id || `v-${slot.date}-${slot.time}`} value={slot.time}>
                         {slot.time}
                       </option>
                     ))}
